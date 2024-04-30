@@ -3,9 +3,10 @@ use std::env;
 use bson::{doc, Document};
 use futures::TryStreamExt;
 use mongodb::{
-    options::{ClientOptions, FindOptions, ServerApi, ServerApiVersion},
+    options::{AggregateOptions, ClientOptions, FindOptions, ServerApi, ServerApiVersion},
     Client, Collection,
 };
+use prettytable::{Cell, Row, Table};
 
 pub async fn read_all_logs(username: String, password: String) -> mongodb::error::Result<()> {
     let client_uri =
@@ -21,47 +22,83 @@ pub async fn read_all_logs(username: String, password: String) -> mongodb::error
     // Get a handle to the cluster
     let client = Client::with_options(client_options).expect("Failure to retrieve client options.");
 
-    // Create connection to Log database.
     let log_db: Collection<Document> = client.database("gym_tracker").collection("logs");
-
-    // Create connection to user database.
     let user_db: Collection<Document> = client.database("gym_tracker").collection("users");
 
-    // Create filter for user
+    // Check if the user exists and the password matches
     let filter_user = doc! {
-        "_id": username.clone().trim(),
-        "password": password.clone().trim(),
+        "_id": username.trim(),
+        "password": password.trim(),
     };
-    let find_user = FindOptions::builder()
-        .sort(doc! {
-        "_id": 1,
-        "password": 1})
-        .build();
 
-    let mut user_cursor = user_db.find(filter_user, find_user).await?;
+    if let Some(_) = user_db.find_one(filter_user.clone(), None).await? {
+        let pipeline = vec![
+            // Filter logs by the current user's username
+            doc! {
+                "$match": {
+                    "username": username.trim(),
+                }
+            },
+            doc! {
+                "$group": {
+                    "_id": {
+                        "username": "$username",
+                        "date": "$date",
+                        "time": "$time",
+                        "muscle_group": "$muscle_group",
+                        "intensity": "$intensity"
+                    }
+                }
+            },
+            doc! {
+                "$project": {
+                    "_id": 0,
+                    "username": "$_id.username",
+                    "date": "$_id.date",
+                    "time": "$_id.time",
+                    "muscle_group": "$_id.muscle_group",
+                    "intensity": "$_id.intensity",
+                }
+            },
+            // Sort logs by date in ascending order
+            doc! {
+                "$sort": {
+                    "date": 1
+                }
+            },
+        ];
 
-    // Create filter and cursor for logs
-    let filter_logs = doc! {
-        "username": username.clone().trim(),
-    };
-    let find_logs = FindOptions::builder()
-        .sort(doc! {
-        "username": 1})
-        .build();
+        let options = AggregateOptions::builder().build();
 
-    let mut log_cursor = log_db.find(filter_logs, find_logs).await?;
+        let mut cursor = log_db.aggregate(pipeline, options).await?;
 
-    // Use both the user and the log cursor to find relevant logs.
-    if let Some(_user) = user_cursor.try_next().await? {
-        while let Some(logs) = log_cursor.try_next().await? {
-            println!(
-                "Log recieved!: 
-                {:#?}",
-                logs
-            )
+        let mut table = Table::new();
+        table.add_row(Row::new(vec![
+            Cell::new("User"),
+            Cell::new("Date"),
+            Cell::new("Time"),
+            Cell::new("Muscle Group"),
+            Cell::new("Intensity"),
+        ]));
+
+        while let Some(doc) = cursor.try_next().await? {
+            let username = doc.get_str("username").unwrap().to_string();
+            let date = doc.get_str("date").unwrap().to_string();
+            let time = doc.get_str("time").unwrap().to_string();
+            let muscle_group = doc.get_str("muscle_group").unwrap().to_string();
+            let intensity = doc.get_str("intensity").unwrap().to_string();
+
+            table.add_row(Row::new(vec![
+                Cell::new(&username),
+                Cell::new(&date),
+                Cell::new(&time),
+                Cell::new(&muscle_group),
+                Cell::new(&intensity),
+            ]));
         }
+        table.printstd();
     } else {
-        println!("Sorry, no logs were found for that account. You can create a new account, or if you already have one; write your first log!")
+        println!("Sorry, no logs were found for that account. You can create a new account, or if you already have one; write your first log!");
     }
     Ok(())
 }

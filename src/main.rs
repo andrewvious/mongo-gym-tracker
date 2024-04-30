@@ -53,5 +53,5 @@ async fn run(args: GymTrackerArgs) {
 async fn main() {
     let args = GymTrackerArgs::parse();
 
-    run(args).await;
+    run(args).await
 }

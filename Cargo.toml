@@ -11,5 +11,6 @@ bson = { version = "2", features = ["chrono-0_4"] } # Needed for using chrono da
 clap = { version = "3.2", features = ["derive"] }
 futures = "0.3"
 tokio = "1"
+prettytable = "0.10.0"
 chrono = "0.4" # Used for setting DateTimes
 serde = "1" # Used in the Map Data into Structs section
